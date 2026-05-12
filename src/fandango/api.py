@@ -1,9 +1,10 @@
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterable
+from copy import deepcopy
 import itertools
 import logging
 import time
-from typing import IO, Any, Optional, cast
+from typing import IO, Any, Optional, TypeVar, cast
 from fandango.constraints.constraint import Constraint
 from fandango.constraints.soft import SoftValue
 from fandango.language.grammar import FuzzingMode, ParsingMode
@@ -201,7 +202,7 @@ class Fandango(FandangoBase):
             start_symbol=start_symbol,
             includes=includes,
         )
-        self.fandango: Optional[DefaultAlgorithm] = None
+        self._fandango: Optional[DefaultAlgorithm] = None
 
     @classmethod
     def _with_parsed(
@@ -216,7 +217,7 @@ class Fandango(FandangoBase):
         obj = cls.__new__(cls)  # bypass __init__ to prevent the need for double parsing
         obj._grammar = grammar
         obj._constraints = constraints
-        obj.fandango = None
+        obj._fandango = None
         obj._start_symbol = start_symbol if start_symbol is not None else "<start>"
         return obj
 
@@ -262,7 +263,7 @@ class Fandango(FandangoBase):
                 )
                 constraints += cast(list[Constraint | SoftValue], extra_constraints)
 
-        self.fandango = DefaultAlgorithm(
+        self._fandango = DefaultAlgorithm(
             self.grammar, constraints, start_symbol=start_symbol, **settings
         )
         LOGGER.info("---------- Done initializing base population ----------")
@@ -281,15 +282,15 @@ class Fandango(FandangoBase):
         :param max_generations: Maximum number of generations to evolve through
         :return: A generator for solutions to the language
         """
-        if self.fandango is None:
+        if self._fandango is None:
             self.init_population()
-            assert self.fandango is not None
+            assert self._fandango is not None
 
         LOGGER.info(
             f"---------- Generating {'' if max_generations is None else f' for {max_generations} generations'}----------"
         )
         start_time = time.time()
-        yield from self.fandango.generate(max_generations=max_generations, mode=mode)
+        yield from self._fandango.generate(max_generations=max_generations, mode=mode)
         LOGGER.info(
             f"---------- Done generating {'' if max_generations is None else f' for {max_generations} generations'}----------"
         )
@@ -357,19 +358,19 @@ class Fandango(FandangoBase):
         :param settings: The settings used for the fuzzing
         :return: A list of derivation trees from the population to append to the solutions before returning; used for best-effort solving of constraints
         """
-        assert self.fandango is not None
+        assert self._fandango is not None
         if desired_solutions is not None and len(solutions) < desired_solutions:
             warnings_are_errors = settings.get("warnings_are_errors", False)
             best_effort = settings.get("best_effort", False)
             if (
-                self.fandango.average_population_fitness
-                < self.fandango.evaluator.expected_fitness
+                self._fandango.average_population_fitness
+                < self._fandango.evaluator.expected_fitness
             ):
                 LOGGER.error("Population did not converge to a perfect population")
                 if warnings_are_errors:
                     raise FandangoFailedError("Failed to find a perfect solution")
                 elif best_effort:
-                    padding = self.fandango.population[
+                    padding = self._fandango.population[
                         : desired_solutions - len(solutions)
                     ]
                     return solutions + padding
@@ -382,7 +383,9 @@ class Fandango(FandangoBase):
                     "Failed to find the required number of perfect solutions"
                 )
             elif best_effort:
-                padding = self.fandango.population[: desired_solutions - len(solutions)]
+                padding = self._fandango.population[
+                    : desired_solutions - len(solutions)
+                ]
                 return solutions + padding
         return []
 
@@ -471,3 +474,38 @@ class Fandango(FandangoBase):
                 last_tree = tree
 
         return last_tree
+
+    def invert_constraints(self, depth: int = 1) -> Iterable[FandangoBase]:
+        if not self._fandango:
+            self.init_population()
+            assert self._fandango is not None
+
+        all_constraints = self._fandango.constraints
+        hard_constraints = [c for c in all_constraints if isinstance(c, Constraint)]
+        soft_constraints = [c for c in all_constraints if isinstance(c, SoftValue)]
+        assert len(hard_constraints) + len(soft_constraints) == len(all_constraints)
+
+        for to_invert, not_to_invert in _split_combinations(hard_constraints, depth):
+            inverted = [c.invert() for c in to_invert]
+            constraints = deepcopy(not_to_invert) + deepcopy(inverted)
+            soft_part = deepcopy(soft_constraints)
+            yield self._with_parsed(
+                self.grammar,
+                constraints + soft_part,
+                start_symbol=self._start_symbol,
+            )
+
+
+T = TypeVar("T")
+
+
+def _split_combinations(
+    iterable: Iterable[T], depth: int
+) -> Iterable[tuple[list[T], list[T]]]:
+    items = tuple(iterable)
+    n = len(items)
+    for chosen_indices in itertools.combinations(range(n), depth):
+        chosen_set = frozenset(chosen_indices)
+        chosen = list(items[i] for i in chosen_indices)
+        rest = list(items[j] for j in range(n) if j not in chosen_set)
+        yield (chosen, rest)

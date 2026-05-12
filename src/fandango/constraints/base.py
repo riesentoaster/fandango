@@ -1,7 +1,10 @@
 import abc
 import itertools
+from copy import deepcopy
 from typing import TYPE_CHECKING, Any, Optional, TypedDict
 import warnings
+
+from cachetools import LRUCache
 
 from fandango.language.search import Container, NonTerminalSearch
 from fandango.language.symbols.non_terminal import NonTerminal
@@ -37,6 +40,29 @@ class GeneticBase(abc.ABC):
         self.searches = searches or dict()
         self.local_variables = local_variables or dict()
         self.global_variables = global_variables or dict()
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> "GeneticBase":
+        """
+        Copy for constraint branching. ``global_variables`` / ``local_variables``
+        may hold eval context entries (e.g. modules from ``predicates``) that
+        standard :func:`copy.deepcopy` cannot copy.
+        """
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for key, value in self.__dict__.items():
+            if key in ("global_variables", "local_variables"):
+                setattr(result, key, value)
+            elif key == "cache":
+                if isinstance(value, dict):
+                    setattr(result, key, {})
+                elif isinstance(value, LRUCache):
+                    setattr(result, key, LRUCache(maxsize=value.maxsize))
+                else:
+                    setattr(result, key, deepcopy(value, memo))
+            else:
+                setattr(result, key, deepcopy(value, memo))
+        return result
 
     def get_access_points(self) -> list[NonTerminal]:
         """
