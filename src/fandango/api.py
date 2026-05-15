@@ -6,6 +6,7 @@ import logging
 import time
 from typing import IO, Any, Optional, TypeVar, cast
 from fandango.constraints.constraint import Constraint
+from fandango.constraints.repetition_bounds import RepetitionBoundsConstraint
 from fandango.constraints.soft import SoftValue
 from fandango.language.grammar import FuzzingMode, ParsingMode
 from fandango.language.grammar.grammar import Grammar
@@ -480,15 +481,20 @@ class Fandango(FandangoBase):
             self.init_population()
             assert self._fandango is not None
 
-        all_constraints = self._fandango.constraints
-        hard_constraints = [c for c in all_constraints if isinstance(c, Constraint)]
-        soft_constraints = [c for c in all_constraints if isinstance(c, SoftValue)]
-        assert len(hard_constraints) + len(soft_constraints) == len(all_constraints)
+        all_to_invert = []
+        all_to_keep: list[Constraint | SoftValue] = []
+        for c in self._fandango.constraints:
+            if isinstance(c, Constraint) and not isinstance(
+                c, RepetitionBoundsConstraint
+            ):
+                all_to_invert.append(c)
+            else:
+                all_to_keep.append(c)
 
-        for to_invert, not_to_invert in _split_combinations(hard_constraints, depth):
-            inverted = [c.invert() for c in to_invert]
+        for to_invert, not_to_invert in _split_combinations(all_to_invert, depth):
+            inverted: list[Constraint | SoftValue] = [c.invert() for c in to_invert]
             constraints = deepcopy(not_to_invert) + deepcopy(inverted)
-            soft_part = deepcopy(soft_constraints)
+            soft_part = deepcopy(all_to_keep)
             yield self._with_parsed(
                 self.grammar,
                 constraints + soft_part,
