@@ -48,11 +48,13 @@ class GrammarProcessor(FandangoParserVisitor):
         grammar_settings: list[FandangoParser.Grammar_setting_contentContext],
         local_variables: Optional[dict[str, Any]] = None,
         global_variables: Optional[dict[str, Any]] = None,
+        code_text: str = "",
         id_prefix: Optional[str] = None,
         max_repetitions: int = 5,
     ):
         self.local_variables = local_variables
         self.global_variables = global_variables
+        self.code_text = code_text
         self.id_prefix = id_prefix
         self.searches = SearchProcessor(Grammar.dummy())
         self.repetition_constraints: list[RepetitionBoundsConstraint] = list()
@@ -82,6 +84,7 @@ class GrammarProcessor(FandangoParserVisitor):
             grammar_settings=self._grammar_settings,
             local_variables=self.local_variables,
             global_variables=self.global_variables,
+            code_text=self.code_text,
         )
         for production in productions:
             symbol = NonTerminal(production.nonterminal().getText())

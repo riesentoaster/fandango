@@ -30,6 +30,7 @@ class PacketNavigator(GrammarNavigator):
                 fuzzing_mode=grammar.fuzzing_mode,
                 local_variables=grammar._local_variables,
                 global_variables=grammar._global_variables,
+                code_text=grammar.code_text,
             ),
             start_symbol,
         )

@@ -49,6 +49,7 @@ class Grammar(NodeVisitor[list[Node], list[Node]]):
         fuzzing_mode: Optional[FuzzingMode] = FuzzingMode.COMPLETE,
         local_variables: Optional[dict[str, Any]] = None,
         global_variables: Optional[dict[str, Any]] = None,
+        code_text: str = "",
     ):
         self._grammar_settings = grammar_settings
         self.rules: dict[NonTerminal, Node] = rules or {}
@@ -56,6 +57,7 @@ class Grammar(NodeVisitor[list[Node], list[Node]]):
         self.fuzzing_mode = fuzzing_mode
         self._local_variables = local_variables or {}
         self._global_variables = global_variables or {}
+        self._code_text = code_text
         self._parser = Parser(self.rules)
         self._k_path_cache: dict[
             tuple[NonTerminal, bool, CoverageGoal], list[set[tuple[Symbol, ...]]]
@@ -65,6 +67,11 @@ class Grammar(NodeVisitor[list[Node], list[Node]]):
     @property
     def grammar_settings(self) -> Sequence[HasSettings]:
         return self._grammar_settings
+
+    @property
+    def code_text(self) -> str:
+        """Python code from .fan files that was executed to populate the spec env."""
+        return self._code_text
 
     @staticmethod
     def _topological_sort(
@@ -277,6 +284,15 @@ class Grammar(NodeVisitor[list[Node], list[Node]]):
             global_variables = grammar._global_variables
             rules = grammar.rules
             fuzzing_mode = grammar.fuzzing_mode
+            if grammar._code_text:
+                if self._code_text:
+                    self._code_text = (
+                        self._code_text.rstrip()
+                        + "\n\n"
+                        + grammar._code_text.lstrip()
+                    )
+                else:
+                    self._code_text = grammar._code_text
         else:
             rules = grammar
             generators = {}
